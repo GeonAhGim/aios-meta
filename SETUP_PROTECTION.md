@@ -4,25 +4,25 @@
 완료 전까지 Guard는 Orchestrator에서만 실행되고(에이전트 프로세스 내부 — 약한 보장),
 완료 후에는 CI에서도 실행돼 에이전트가 우회할 수 없다(강한 보장).
 
-## 1. GitHub 저장소 생성 (private)
+## 1. GitHub 저장소 생성 (public — 정책·Guard 코드뿐이라 비밀이 없고, 무료 플랜에서 브랜치 보호가 켜진다)
 ```
 cd C:\aios\meta
 git add -A && git commit -m "meta: immutable policy + guards v1"
-gh repo create GeonAhGim/aios-meta --private --source . --push
+gh repo create GeonAhGim/aios-meta --public --source . --push
 ```
 
 ## 2. 브랜치 보호 (GitHub 웹 → Settings → Branches → main)
 - Require a pull request before merging, Require review from Code Owners, Do not allow bypassing.
 - `CODEOWNERS`(이 저장소 루트)에 `* @GeonAhGim` — 사람 계정만.
-- 에이전트가 쓰는 자격증명(PAT/gh 로그인)에 이 저장소 **write 권한을 주지 않는다**.
-  (fine-grained PAT: mihwa-aios만 contents:write, aios-meta는 read-only)
+- 현재 에이전트가 사용자 계정(gh 로그인)으로 동작하므로 계정 분리는 불가능하다. 대신 `enforce_admins`
+  + CODEOWNERS 리뷰 필수로 **PR 작성자(에이전트=같은 계정)가 자기 PR을 승인할 수 없게** 한다 — 사람이
+  GitHub 웹에서 직접 승인·병합할 때만 변경된다. 직접 push는 관리자에게도 막힌다.
 
 ## 3. mihwa-aios CI에 Guard 연결
-- mihwa-aios 저장소 Settings → Secrets → `META_REPO_TOKEN`: aios-meta **read-only** fine-grained PAT.
-- `.github/workflows/quality.yml`의 `guards` job이 그 토큰으로 aios-meta를 **고정 커밋**으로 checkout해
-  `guards/run_guards.py`를 실행한다. 고정 커밋 SHA는 `META_GUARDS_REF` repository variable로 관리 —
-  올릴 때도 사람이 한다.
-- 토큰이 없으면 job은 실패한다(건너뛰지 않음). 설정 전에는 mihwa-aios CI가 빨간 상태인 것이 의도다.
+- public 저장소라 토큰이 필요 없다. `.github/workflows/quality.yml`의 `guards` job이 aios-meta를
+  **고정 커밋**(`META_GUARDS_REF` repository variable)으로 checkout해 `guards/run_guards.py`를 실행한다.
+- `META_GUARDS_REF`가 없으면 job은 실패한다(건너뛰지 않음). SHA를 올리는 것도 사람이 한다
+  (`gh variable set META_GUARDS_REF --repo GeonAhGim/mihwa-aios --body <sha>`).
 
 ## 4. 로컬 보호(선택)
 - `C:\aios\meta`를 읽기 전용 속성으로 두고, 에이전트 실행 계정과 분리하려면 별도 Windows 사용자로
