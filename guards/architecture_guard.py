@@ -4,6 +4,7 @@ veto: 병합 불가. flag: 병합은 가능하나 Chief Architect 검토 항목�
 """
 from __future__ import annotations
 
+import ast
 import fnmatch
 import re
 from pathlib import Path
@@ -42,12 +43,32 @@ def _match(path: str, globs: tuple[str, ...]) -> bool:
 
 
 def _contract_fields(text: str | None) -> dict[str, tuple[str, bool]]:
-    """{field: (type, required)} — pydantic 클래스 본문의 들여쓰기 4칸 필드만 본다."""
+    """{"Class.field": (type, required)} — AST로 클래스 본문의 주석 대입(AnnAssign)만 읽는다.
+
+    2026-09-08(esc-2035): 이전 구현은 '4칸 들여쓰기 name: type' 정규식으로 필드를 모아 파일 단위
+    평면 dict에 담았다. 계약 파일에 여러 줄 함수 시그니처가 들어가면 그 인자(outcome/reason_codes 등)가
+    같은 이름의 pydantic 필드를 덮어써 P5.contract_type_changed 오탐 veto가 났고 워커 한 턴을 버렸다.
+    AST는 함수 인자·dict 리터럴·다중행 호출을 필드로 오인하지 않고, 키를 클래스로 한정해 동명 필드 충돌도 없앤다.
+    타입 문자열은 ast.unparse로 정규화되므로 before/after가 같은 규칙으로 비교된다.
+    """
     fields: dict[str, tuple[str, bool]] = {}
-    for line in (text or "").splitlines():
-        m = _FIELD_RE.match(line)
-        if m and not m.group(1).startswith("model_"):
-            fields[m.group(1)] = (m.group(2).strip(), m.group(3) is None)
+    if not text:
+        return fields
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return fields
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for stmt in node.body:
+            if not (isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)):
+                continue
+            name = stmt.target.id
+            if name.startswith("model_") or name.startswith("_"):
+                continue
+            typ = ast.unparse(stmt.annotation)
+            fields[f"{node.name}.{name}"] = (typ, stmt.value is None)
     return fields
 
 
