@@ -6,7 +6,15 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SRC_LINE_CAP = 300
+# P6 파일 길이 — ADR-2026-09-10-C Decision 2 (aios). 300줄 "초과 금지"는 폐지.
+# 500줄 경고(flag) · 800줄 아키텍처 리뷰 트리거(flag) · 1,000줄 하드(veto).
+# 1,000줄 예외는 파일 첫 LOC_ALLOW_HEAD_LINES 줄 안의 `loc-allow: <사유>` 주석
+# (생성 테이블·프로토콜 매핑·결정론 규칙 행렬)로만 허용한다.
+SRC_LINE_WARN = 500
+SRC_LINE_REVIEW = 800
+SRC_LINE_CAP = 1000
+LOC_ALLOW_MARKER = "loc-allow:"
+LOC_ALLOW_HEAD_LINES = 20
 
 
 @dataclass
