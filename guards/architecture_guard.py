@@ -1,6 +1,9 @@
 """Architecture Guard — policy/immutable.md P1·P5·P6를 diff에 대해 검사한다.
 
 veto: 병합 불가. flag: 병합은 가능하나 Chief Architect 검토 항목으로 에스컬레이션.
+
+P6 파일 길이(ADR-2026-09-10-C D2): 500줄 flag(P6.line_warn) · 800줄 flag(P6.line_review)
+· 1,000줄 veto(P6.line_cap, 파일 상단 `loc-allow: <사유>`로 예외).
 """
 from __future__ import annotations
 
@@ -10,7 +13,11 @@ import re
 from pathlib import Path
 
 from common import (
+    LOC_ALLOW_HEAD_LINES,
+    LOC_ALLOW_MARKER,
     SRC_LINE_CAP,
+    SRC_LINE_REVIEW,
+    SRC_LINE_WARN,
     Finding,
     Report,
     added_lines,
@@ -30,6 +37,25 @@ FROZEN_PAPER_ONLY = (
 CONTRACT_GLOBS = ("src/foundation/*/contracts/v1.py", "src/contracts/*.py", "src/api/schemas/*.py")
 META_CONTROL = (".aios-zone", "CODEOWNERS", ".github/workflows/*", "scripts/check_zone_manifest.py")
 _FIELD_RE = re.compile(r"^\s{4}([a-z_][a-z0-9_]*)\s*:\s*(.+?)(\s*=.*)?$")
+
+
+def _has_loc_allow(text: str) -> bool:
+    head = text.splitlines()[:LOC_ALLOW_HEAD_LINES]
+    return any(LOC_ALLOW_MARKER in line and line.lstrip().startswith("#") for line in head)
+
+
+def _line_length_findings(path: str, text: str, n: int) -> list[Finding]:
+    """P6 (ADR-2026-09-10-C D2): 1,000줄 veto(loc-allow 예외), 800줄·500줄 flag."""
+    if n > SRC_LINE_CAP and not _has_loc_allow(text):
+        return [Finding("architecture", "P6.line_cap", "veto", path,
+                        f"{n}줄 > {SRC_LINE_CAP} (예외: 첫 {LOC_ALLOW_HEAD_LINES}줄 내 `# loc-allow: <사유>`)")]
+    if n > SRC_LINE_REVIEW:
+        return [Finding("architecture", "P6.line_review", "flag", path,
+                        f"{n}줄 > {SRC_LINE_REVIEW} — 아키텍처 리뷰(책임 둘 이상? 독립 변경축? 공개/비공개 분리?)")]
+    if n > SRC_LINE_WARN:
+        return [Finding("architecture", "P6.line_warn", "flag", path,
+                        f"{n}줄 > {SRC_LINE_WARN} — 리뷰어가 책임 혼합 확인")]
+    return []
 
 
 def _match(path: str, globs: tuple[str, ...]) -> bool:
@@ -90,10 +116,7 @@ def check(repo: Path, base: str, head: str, *, frozen_approved: bool) -> Report:
         if path.startswith("src/") and path.endswith(".py") and status != "D":
             text = file_at(repo, head, path) or ""
             n = text.count("\n") + 1
-            if n > SRC_LINE_CAP:
-                rep.findings.append(
-                    Finding("architecture", "P6.line_cap", "veto", path, f"{n}줄 > {SRC_LINE_CAP}")
-                )
+            rep.findings.extend(_line_length_findings(path, text, n))
         if _match(path, CONTRACT_GLOBS) and status == "M":
             before = _contract_fields(file_at(repo, base, path))
             after = _contract_fields(file_at(repo, head, path))
